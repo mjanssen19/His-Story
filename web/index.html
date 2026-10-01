@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex, nofollow">
+  <title>His-Story</title>
+  <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@5/dist/maplibre-gl.css">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <aside id="panel">
+    <header>
+      <h1>His-Story</h1>
+      <p id="stats" class="muted">Loading…</p>
+    </header>
+    <div class="filters">
+      <input id="q" type="search" placeholder="Search venue, city, country, people, notes…" autocomplete="off">
+      <div class="dates">
+        <label>From <input id="from" type="date"></label>
+        <label>To <input id="to" type="date"></label>
+      </div>
+      <div class="toggles">
+        <button id="clear" type="button">Clear filters</button>
+        <button id="projection" type="button">Flat map</button>
+        <label class="check"><input id="route" type="checkbox"> Route</label>
+      </div>
+    </div>
+    <ol id="results"></ol>
+  </aside>
+  <main>
+    <div id="map"></div>
+    <div id="timeline" title="Drag to select a period">
+      <canvas id="hist"></canvas>
+    </div>
+  </main>
+  <script src="https://unpkg.com/maplibre-gl@5/dist/maplibre-gl.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,27 @@
+# His-Story behind a Cloudflare Tunnel: nginx listens on loopback only, the tunnel
+# proxies the public hostname to this port, and Cloudflare Access does the login.
+# Copy to /etc/nginx/sites-available/<domain>, symlink into sites-enabled, then:
+#   sudo nginx -t && sudo systemctl reload nginx
+server {
+    listen 127.0.0.1:8088;
+    server_name history.example.com;
+
+    root /var/www/history.example.com;
+    index index.html;
+
+    # Personal location history: keep it out of search engines.
+    add_header X-Robots-Tag "noindex, nofollow" always;
+
+    gzip on;
+    gzip_types application/json application/javascript text/css;
+
+    location / {
+        try_files $uri $uri/ =404;
+    }
+
+    # The data file changes on every publish.
+    location /data/ {
+        add_header Cache-Control "no-cache";
+        add_header X-Robots-Tag "noindex, nofollow" always;
+    }
+}

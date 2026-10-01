@@ -1,0 +1,16 @@
+# Personal data never goes in the repo
+data/
+*.sqlite
+*.sqlite-*
+.env
+data-export-*/
+# Generated demo output (regenerate with scripts/make_demo_data.py)
+demo/data/
+# Python
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+uv.lock
+.DS_Store
+deploy/deploy.env
