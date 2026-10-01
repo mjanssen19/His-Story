@@ -9,7 +9,7 @@ import shutil
 
 WEB = pathlib.Path(__file__).resolve().parent.parent / "web"
 COLUMNS = ["id", "t", "tz", "lat", "lng", "venue", "cat", "city", "cc", "country",
-           "shout", "people", "photos", "private", "closed", "removed"]
+           "shout", "people", "photos", "private", "closed", "removed", "vid"]
 VISIT_COLUMNS = ["start", "end", "tz", "lat", "lng", "label", "city", "cc"]
 SAME_VISIT_SECONDS = 120     # a visit and an unconfirmed visit starting this close are one event
 CHECKIN_MARGIN = 30 * 60     # a check-in at the venue this close to the visit means it's already on the map
@@ -53,7 +53,7 @@ def build_site(conn, out_dir, media_dir):
             r["id"], r["created_at"], r["tz_offset"] or 0, round(lat, 5), round(lng, 5),
             r["venue_name"], r["category_name"], r["city"] or city_of.get(r["venue_id"]), r["cc"], r["country"],
             r["shout"], people.get(r["id"]), photos.get(r["id"]),
-            r["is_private"], r["closed"] or 0, 1 if r["removed_in_run"] else 0,
+            r["is_private"], r["closed"] or 0, 1 if r["removed_in_run"] else 0, r["venue_id"],
         ])
 
     (out / "data" / "checkins.json").write_text(

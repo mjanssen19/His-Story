@@ -157,7 +157,8 @@
 
   // ---- list + stats ----------------------------------------------------------
   function render() {
-    const venues = new Set(filtered.map((c) => c.venue)).size;
+    // Count by venue id: different places can share a name ("Starbucks").
+    const venues = new Set(filtered.map((c) => c.vid || c.venue)).size;
     const countries = new Set(filtered.map((c) => c.cc).filter(Boolean)).size;
     const cities = new Set(filtered.map((c) => c.city).filter(Boolean)).size;
     $("stats").textContent = `${filtered.length.toLocaleString()} check-ins · ${venues.toLocaleString()} venues · ${cities} cities · ${countries} countries` +
@@ -295,6 +296,7 @@
   });
   $("projection").addEventListener("click", () => {
     globe = !globe;
+    if (popup) popup.remove();
     map.setProjection({ type: globe ? "globe" : "mercator" });
     $("projection").textContent = globe ? "Flat map" : "Globe";
   });
