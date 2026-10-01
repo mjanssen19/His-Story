@@ -135,3 +135,30 @@ def test_build_hides_nothing_but_flags_removed(conn, tmp_path):
     data = json.loads((tmp_path / "site" / "data" / "checkins.json").read_text())
     removed = {r[0]: r[data["columns"].index("removed")] for r in data["rows"]}
     assert removed == {"a": 1, "b": 0}
+
+
+def write_visits(folder, visits, unconfirmed):
+    (folder / "visits.json").write_text(json.dumps({"count": len(visits), "items": visits}))
+    (folder / "unconfirmed_visits.json").write_text(json.dumps({"count": len(unconfirmed), "items": unconfirmed}))
+
+
+def test_visit_layer_shows_only_places_without_checkin_once(conn, tmp_path):
+    # The visits layer exists to fill gaps: a place you checked in at is already on the map,
+    # and the export's repeated records of one moment must not show up as several visits.
+    ex = write_export(tmp_path / "ex", [export_checkin("a", "2020-01-01 10:05:00.000000", venue=("cafe", "Cafe"))])
+    visit = {"id": "v1", "timeArrived": "2020-01-01 10:00:00.000000", "timeDeparted": "2020-01-01 11:00:00.000000",
+             "latitude": 52.37, "longitude": 4.89, "city": "Amsterdam", "countryCode": "NL"}
+    gap = {"id": "v2", "timeArrived": "2020-01-02 15:00:00.000000", "timeDeparted": "2020-01-02 16:00:00.000000",
+           "latitude": 51.92, "longitude": 4.48, "city": "Rotterdam", "countryCode": "NL"}
+    gap_repeat = {**gap, "id": "v3"}
+    unconfirmed = [
+        {"id": "u1", "startTime": "2020-01-01 10:00:30.000000", "endTime": "2020-01-01 11:00:00.000000",
+         "venueId": "cafe", "lat": 52.37, "lng": 4.89, "venue": {"id": "cafe", "name": "Cafe"}},
+        {"id": "u2", "startTime": "2020-01-02 15:00:00.000000", "endTime": "2020-01-02 16:00:00.000000",
+         "venueId": "museum", "lat": 51.92, "lng": 4.48, "venue": {"id": "museum", "name": "Museum"}},
+    ]
+    write_visits(ex, [visit, gap, gap_repeat], unconfirmed)
+    import_export.import_export(conn, ex, tmp_path / "m")
+    rows = build.build_visits(conn)
+    labels = [(r[build.VISIT_COLUMNS.index("label")], r[build.VISIT_COLUMNS.index("city")]) for r in rows]
+    assert labels == [("Museum", "Rotterdam")]

@@ -30,6 +30,7 @@
 
   // ---- state + filtering -----------------------------------------------------
   let filtered = all;
+  let visits = null, filteredVisits = [];
   function applyFilters() {
     const terms = fold($("q").value).split(/\s+/).filter(Boolean);
     const from = $("from").value, to = $("to").value;
@@ -37,6 +38,9 @@
       !c.removed &&
       (!from || c.day >= from) && (!to || c.day <= to) &&
       terms.every((t) => c.text.includes(t)));
+    filteredVisits = $("visits").checked && visits ? visits.filter((v) =>
+      (!from || v.day >= from) && (!to || v.day <= to) &&
+      terms.every((t) => v.text.includes(t))) : [];
     if (popup) popup.remove();
     render();
   }
@@ -56,6 +60,15 @@
     map.setProjection({ type: globe ? "globe" : "mercator" });
     const accent = cssVar("--accent");
     map.addSource("checkins", { type: "geojson", data: geojson(), cluster: true, clusterRadius: 40, clusterMaxZoom: 14 });
+    map.addSource("visits", { type: "geojson", data: visitsGeojson() });
+    map.addLayer({
+      id: "visits", type: "circle", source: "visits",
+      paint: {
+        "circle-color": cssVar("--muted"), "circle-opacity": 0.55,
+        "circle-radius": ["interpolate", ["linear"], ["zoom"], 2, 2, 12, 5],
+        "circle-stroke-width": 1, "circle-stroke-color": cssVar("--panel"),
+      },
+    });
     map.addSource("route", { type: "geojson", data: routeGeojson() });
     map.addLayer({ id: "route", type: "line", source: "route", paint: { "line-color": accent, "line-width": 2, "line-opacity": 0.6 } });
     map.addLayer({
@@ -87,7 +100,19 @@
     const ids = e.features.map((f) => f.properties.id);
     showPopup(e.features[0].geometry.coordinates, ids.map((id) => byId.get(id)));
   });
-  for (const layer of ["clusters", "points"]) {
+  map.on("click", "visits", (e) => {
+    // Check-ins sit on top; only show a visit popup when no check-in was clicked.
+    if (map.queryRenderedFeatures(e.point, { layers: ["clusters", "points"] }).length) return;
+    const v = filteredVisits[e.features[0].properties.i];
+    const mins = v.end ? Math.round((v.end - v.start) / 60) : null;
+    const dur = mins == null ? "" : mins >= 90 ? ` · ${Math.round(mins / 60)} h` : ` · ${mins} min`;
+    if (popup) popup.remove();
+    popup = new maplibregl.Popup({ maxWidth: "320px" }).setLngLat(e.features[0].geometry.coordinates).setHTML(
+      `<div class="popup"><h3>${esc(v.label || v.city || "Detected visit")}</h3>
+       <div class="meta">Detected visit, no check-in${v.label && v.city ? " · " + esc(v.city) : ""}</div>
+       <p><strong>${esc(fmt(v.local))}</strong>${dur}</p></div>`).addTo(map);
+  });
+  for (const layer of ["clusters", "points", "visits"]) {
     map.on("mouseenter", layer, () => (map.getCanvas().style.cursor = "pointer"));
     map.on("mouseleave", layer, () => (map.getCanvas().style.cursor = ""));
   }
@@ -96,6 +121,12 @@
     return {
       type: "FeatureCollection",
       features: filtered.map((c) => ({ type: "Feature", properties: { id: c.id }, geometry: { type: "Point", coordinates: [c.lng, c.lat] } })),
+    };
+  }
+  function visitsGeojson() {
+    return {
+      type: "FeatureCollection",
+      features: filteredVisits.map((v, i) => ({ type: "Feature", properties: { i }, geometry: { type: "Point", coordinates: [v.lng, v.lat] } })),
     };
   }
   function routeGeojson() {
@@ -129,7 +160,8 @@
     const venues = new Set(filtered.map((c) => c.venue)).size;
     const countries = new Set(filtered.map((c) => c.cc).filter(Boolean)).size;
     const cities = new Set(filtered.map((c) => c.city).filter(Boolean)).size;
-    $("stats").textContent = `${filtered.length.toLocaleString()} check-ins · ${venues.toLocaleString()} venues · ${cities} cities · ${countries} countries`;
+    $("stats").textContent = `${filtered.length.toLocaleString()} check-ins · ${venues.toLocaleString()} venues · ${cities} cities · ${countries} countries` +
+      ($("visits").checked ? ` · ${filteredVisits.length.toLocaleString()} visits` : "");
 
     const items = filtered.slice(-LIST_LIMIT).reverse();
     $("results").innerHTML = items.map((c) => `
@@ -143,6 +175,7 @@
     if (map.getSource("checkins")) {
       map.getSource("checkins").setData(geojson());
       map.getSource("route").setData(routeGeojson());
+      map.getSource("visits").setData(visitsGeojson());
     }
     drawTimeline();
   }
@@ -156,9 +189,10 @@
   });
 
   function fitToFiltered() {
-    if (!filtered.length) return;
+    if (!filtered.length && !filteredVisits.length) return;
     const b = new maplibregl.LngLatBounds();
     filtered.forEach((c) => b.extend([c.lng, c.lat]));
+    filteredVisits.forEach((v) => b.extend([v.lng, v.lat]));
     map.fitBounds(b, { padding: 60, maxZoom: 14, duration: 800 });
   }
 
@@ -241,6 +275,20 @@
   });
   for (const id of ["from", "to"]) $(id).addEventListener("change", () => { applyFilters(); fitToFiltered(); });
   $("route").addEventListener("change", render);
+  $("visits").addEventListener("change", async () => {
+    if ($("visits").checked && !visits) {
+      // Loaded only when first switched on.
+      const d = await (await fetch("data/visits.json")).json();
+      visits = d.rows.map((r) => {
+        const v = Object.fromEntries(d.columns.map((c, i) => [c, r[i]]));
+        v.local = new Date((v.start + v.tz * 60) * 1000);
+        v.day = v.local.toISOString().slice(0, 10);
+        v.text = fold([v.label, v.city].join(" "));
+        return v;
+      });
+    }
+    applyFilters();
+  });
   $("clear").addEventListener("click", () => {
     $("q").value = $("from").value = $("to").value = "";
     applyFilters();

@@ -5,6 +5,7 @@ Turn your Foursquare **Swarm** check-in history into a private, searchable map a
 - Search by venue, city, country, people or your own notes
 - Select a date range, or drag across the timeline, to see where you were in that period
 - Switch between a 3D globe and a flat map, and draw your route
+- Optional **Visits** layer: places Swarm detected you at without a check-in (from the data export), with how long you stayed
 - Everything is stored in one **SQLite** database that you own; the website is static files
 
 Your data never leaves your machine unless you publish the generated site yourself.

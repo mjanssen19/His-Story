@@ -1,7 +1,8 @@
-"""Build the static site: web/ files + data/checkins.json + media/ from the database.
+"""Build the static site: web/ files + data/checkins.json + data/visits.json + media/ from the database.
 
 The output folder can be served by any static web server (nginx, GitHub Pages, ...).
 """
+import bisect
 import json
 import pathlib
 import shutil
@@ -9,6 +10,9 @@ import shutil
 WEB = pathlib.Path(__file__).resolve().parent.parent / "web"
 COLUMNS = ["id", "t", "tz", "lat", "lng", "venue", "cat", "city", "cc", "country",
            "shout", "people", "photos", "private", "closed", "removed"]
+VISIT_COLUMNS = ["start", "end", "tz", "lat", "lng", "label", "city", "cc"]
+SAME_VISIT_SECONDS = 120     # a visit and an unconfirmed visit starting this close are one event
+CHECKIN_MARGIN = 30 * 60     # a check-in at the venue this close to the visit means it's already on the map
 
 
 def build_site(conn, out_dir, media_dir):
@@ -54,7 +58,78 @@ def build_site(conn, out_dir, media_dir):
 
     (out / "data" / "checkins.json").write_text(
         json.dumps({"columns": COLUMNS, "rows": rows}, ensure_ascii=False, separators=(",", ":")))
-    return {"checkins": len(rows), "photos_local": len(list(media_out.iterdir()))}
+    visits = build_visits(conn)
+    (out / "data" / "visits.json").write_text(
+        json.dumps({"columns": VISIT_COLUMNS, "rows": visits}, ensure_ascii=False, separators=(",", ":")))
+    return {"checkins": len(rows), "visits": len(visits), "photos_local": len(list(media_out.iterdir()))}
+
+
+def build_visits(conn):
+    """Places Swarm detected you at, minus the ones you also checked in at.
+
+    `visits` has duration + city, `unconfirmed_visits` has the guessed venue; when both
+    describe the same moment they are merged into one row.
+    """
+    checkins = conn.execute("SELECT created_at, tz_offset, venue_id FROM checkins "
+                            "WHERE removed_in_run IS NULL ORDER BY created_at").fetchall()
+    times = [c["created_at"] for c in checkins]
+
+    def tz_near(t):
+        # Visits have no time zone; borrow it from the check-in closest in time.
+        if not times:
+            return 0
+        i = bisect.bisect_left(times, t)
+        best = min((j for j in (i - 1, i) if 0 <= j < len(times)), key=lambda j: abs(times[j] - t))
+        return checkins[best]["tz_offset"] or 0
+
+    def checked_in(venue_id, start, end):
+        if not venue_id:
+            return False
+        lo = bisect.bisect_left(times, start - CHECKIN_MARGIN)
+        hi = bisect.bisect_right(times, (end or start) + CHECKIN_MARGIN)
+        return any(checkins[j]["venue_id"] == venue_id for j in range(lo, hi))
+
+    # The export repeats the same moment under different ids; keep one per time + place
+    # (for unconfirmed visits, preferring a record that names the venue).
+    def dedupe(rows, time_col):
+        best = {}
+        for r in rows:
+            if r["lat"] is None:
+                continue
+            key = (r[time_col], round(r["lat"], 3), round(r["lng"], 3))
+            if key not in best or (not best[key]["venue_name"] if "venue_name" in r.keys() else False):
+                best[key] = r
+        return sorted(best.values(), key=lambda r: r[time_col])
+
+    unconfirmed = dedupe(conn.execute("SELECT * FROM unconfirmed_visits").fetchall(), "start_at")
+    u_starts = [u["start_at"] for u in unconfirmed]
+    used = set()
+    rows = []
+    for v in dedupe(conn.execute("SELECT * FROM visits").fetchall(), "arrived_at"):
+        match = None
+        i = bisect.bisect_left(u_starts, v["arrived_at"] - SAME_VISIT_SECONDS)
+        while i < len(unconfirmed) and u_starts[i] <= v["arrived_at"] + SAME_VISIT_SECONDS:
+            if i not in used:
+                match = i
+                break
+            i += 1
+        venue_id = label = None
+        if match is not None:
+            used.add(match)
+            venue_id, label = unconfirmed[match]["venue_id"], unconfirmed[match]["venue_name"]
+        if checked_in(venue_id, v["arrived_at"], v["departed_at"]):
+            continue
+        rows.append([v["arrived_at"], v["departed_at"], tz_near(v["arrived_at"]), round(v["lat"], 5),
+                     round(v["lng"], 5), label, v["city"], v["cc"]])
+    emitted = {(r[0], round(r[3], 3), round(r[4], 3)) for r in rows}
+    for i, u in enumerate(unconfirmed):
+        if (i in used or (u["start_at"], round(u["lat"], 3), round(u["lng"], 3)) in emitted
+                or checked_in(u["venue_id"], u["start_at"], u["end_at"])):
+            continue
+        rows.append([u["start_at"], u["end_at"], tz_near(u["start_at"]), round(u["lat"], 5),
+                     round(u["lng"], 5), u["venue_name"], None, None])
+    rows.sort(key=lambda r: r[0])
+    return rows
 
 
 def _nearest_city_lookup(conn, max_km=25):
